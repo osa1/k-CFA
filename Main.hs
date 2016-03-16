@@ -1,14 +1,15 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
 
 module Main where
 
 --------------------------------------------------------------------------------
 
-import qualified Data.Map as M
-import qualified Data.Set as S
+import qualified Data.Map  as M
+import qualified Data.Set  as S
 
-import Prelude hiding (succ)
-import Data.List (foldl')
+import           Data.List (foldl')
+import           Prelude   hiding (succ)
 
 --------------------------------------------------------------------------------
 -- * Syntax
@@ -140,7 +141,7 @@ data Clo' a = Clo' Lam (BEnv' a)
 
 data Proc' a = CloProc' (Clo' a) | Halt'
 
-data Val' a = Proc' a
+type Val' a = Proc' a
 
 -- Denotable values
 type D' a = S.Set (Val' a)
@@ -152,3 +153,61 @@ data State' a = EvalState' (Eval' a) | ApplyState' (Apply' a)
 
 data Eval'  a = Eval' Call (BEnv' a) (Conf' a) (Time' a)
 data Apply' a = Apply' (Proc' a) [D' a] (Conf' a) (Time' a)
+
+--------------------------------------------------------------------------------
+
+type AbstractTime a = Time -> Time' a
+
+abstractState :: (Ord (Time' a), Ord (Val' (Time' a)))
+              => AbstractTime a -> State -> State' a
+abstractState at (EvalState eval)
+  = EvalState' (abstractEval at eval)
+abstractState at (ApplyState apply)
+  = ApplyState' (abstractApply at apply)
+
+abstractEval :: (Ord (Time' a), Ord (Val' (Time' a)))
+             => AbstractTime a -> Eval -> Eval' a
+abstractEval at (Eval call be conf t)
+  = Eval' call (abstractBEnv at be) (abstractConf at conf) (at t)
+
+abstractApply :: (Ord (Time' a), Ord (Val' (Time' a)))
+              => AbstractTime a -> Apply -> Apply' a
+abstractApply at (Apply proc as conf t)
+  = Apply' (abstractProc at proc) (map (abstractD at) as) (abstractConf at conf) (at t)
+
+abstractBEnv :: AbstractTime a -> BEnv -> BEnv' a
+abstractBEnv = M.map
+
+abstractConf :: forall a . (Ord (Time' a), Ord (Val' a))
+             => AbstractTime a -> Conf -> Conf' a
+abstractConf at venv =
+    let
+      heap :: [((Var, Time), D)]
+      heap = M.toList venv
+
+      -- TODO: It seems like a concrete time can abstract to multiple abstract
+      -- times. I don't support this in this code. But multiple concrete times
+      -- can abstract to same abstract times. (TODO: isn't this always the case?)
+
+      heap' :: [((Var, Time' a), D' a)]
+      heap' = map (\((v, t), d) -> ((v, at t), abstractD at d)) heap
+    in
+      M.fromListWith lubD' heap'
+
+abstractProc :: AbstractTime a -> Proc -> Proc' a
+abstractProc _ Halt
+  = Halt'
+abstractProc at (CloProc clo)
+  = CloProc' (abstractClo at clo)
+
+abstractClo :: AbstractTime a -> Clo -> Clo' a
+abstractClo at (Clo lam benv) = Clo' lam (abstractBEnv at benv)
+
+abstractD :: AbstractTime a -> D -> D' a
+abstractD at val = S.singleton (abstractVal at val)
+
+abstractVal :: AbstractTime a -> Val -> Val' a
+abstractVal = abstractProc
+
+lubD' :: Ord (Val' a) => D' a -> D' a -> D' a
+lubD' = S.union
