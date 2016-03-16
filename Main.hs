@@ -99,7 +99,7 @@ evalArg (RefE (Ref _ v)) benv venv
 evalArg (LamE lam) benv _
   = Just (CloProc (Clo lam benv))
 
--- 'I' in the thesis
+-- 'I' in the thesis. (inject?)
 programToState :: Pr -> State
 programToState pr = ApplyState (Apply (CloProc (Clo pr M.empty)) [Halt] M.empty 0)
 
@@ -223,6 +223,9 @@ evalArg' (RefE (Ref _ v)) benv venv
 evalArg' (LamE lam) benv _
   = Just (S.singleton (CloProc' (Clo' lam benv)))
 
+programToState' :: Time' a -> Pr -> State' a
+programToState' t pr = ApplyState' (Apply' (CloProc' (Clo' pr M.empty)) [S.singleton Halt'] M.empty t)
+
 nextState' :: Ord (Time' a) => (State' a -> Time' a -> Time' a) -> State' a -> Maybe [State' a]
 nextState' succ' st@(EvalState' (Eval' (Call _lbl f as) be ve t))
   = do let t' = succ' st t
@@ -235,3 +238,6 @@ nextState' succ' st@(ApplyState' (Apply' (CloProc' (Clo' (Lam _lbl as body) be))
        let be' = foldl' (\m k -> M.insert k t' m)     be as
        let ve' = foldl' (\m (k, v) -> M.insert k v m) ve (zip (zip as (repeat t')) as')
        return [EvalState' (Eval' body be' ve' t')]
+
+nextState' _ (ApplyState' (Apply' Halt' _ _ _))
+  = Nothing
