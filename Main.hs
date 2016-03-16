@@ -155,6 +155,7 @@ data Eval'  a = Eval' Call (BEnv' a) (Conf' a) (Time' a)
 data Apply' a = Apply' (Proc' a) [D' a] (Conf' a) (Time' a)
 
 --------------------------------------------------------------------------------
+-- * Abstracting concrete configurations
 
 type AbstractTime a = Time -> Time' a
 
@@ -191,7 +192,7 @@ abstractConf at venv =
 
       heap' :: [((Var, Time' a), D' a)]
       heap' = map (\((v, t), d) -> ((v, at t), abstractD at d)) heap
-    in
+     in
       M.fromListWith lubD' heap'
 
 abstractProc :: AbstractTime a -> Proc -> Proc' a
@@ -211,3 +212,26 @@ abstractVal = abstractProc
 
 lubD' :: Ord (Val' a) => D' a -> D' a -> D' a
 lubD' = S.union
+
+--------------------------------------------------------------------------------
+-- * Abstract semantics
+
+evalArg' :: Ord (Time' a) => Exp -> BEnv' a -> VEnv' a -> Maybe (D' a)
+evalArg' (RefE (Ref _ v)) benv venv
+  = do bt <- M.lookup v benv
+       M.lookup (v, bt) venv
+evalArg' (LamE lam) benv _
+  = Just (S.singleton (CloProc' (Clo' lam benv)))
+
+nextState' :: Ord (Time' a) => (State' a -> Time' a -> Time' a) -> State' a -> Maybe [State' a]
+nextState' succ' st@(EvalState' (Eval' (Call _lbl f as) be ve t))
+  = do let t' = succ' st t
+       proc ::  D' a  <- evalArg' f be ve
+       as'  :: [D' a] <- mapM (\a -> evalArg' a be ve) as
+       return (map (\p -> ApplyState' (Apply' p as' ve t')) (S.toList proc))
+
+nextState' succ' st@(ApplyState' (Apply' (CloProc' (Clo' (Lam _lbl as body) be)) as' ve t))
+  = do let t'  = succ' st t
+       let be' = foldl' (\m k -> M.insert k t' m)     be as
+       let ve' = foldl' (\m (k, v) -> M.insert k v m) ve (zip (zip as (repeat t')) as')
+       return [EvalState' (Eval' body be' ve' t')]
